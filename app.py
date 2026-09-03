@@ -11,7 +11,7 @@ M3U_SOURCE_URL = "https://tight-firefly-ecdd.poonamchouhan076.workers.dev/"
 
 @app.route('/')
 def home():
-    return "PRT Stream SonyLIV Rewriter & Proxy is Running!"
+    return "PRT Stream Custom M3U8 Rewriter & Proxy is Running!"
 
 @app.route('/channels', methods=['GET'])
 def get_channels():
@@ -27,6 +27,7 @@ def get_channels():
         lines = m3u_content.splitlines()
         current_channel = {}
         
+        channel_index = 0
         for line in lines:
             line = line.strip()
             if not line:
@@ -49,8 +50,14 @@ def get_channels():
             elif not line.startswith("#"):
                 if current_channel and "title" in current_channel:
                     raw_link = line
-                    rewritten_link = f"{base_url}/stream_proxy?url={quote(raw_link, safe='')}"
-                    current_channel["m3u8"] = rewritten_link
+                    # यहाँ असली लिंक को छिपाकर अपना खुद का वर्चुअल m3u8 लिंक बना रहे हैं!
+                    channel_index += 1
+                    safe_slug = re.sub(r'[^a-zA-Z0-9]', '_', current_channel["title"]).lower()
+                    
+                    # JSON में दिखने वाला तेरा खुद का लिंक
+                    virtual_m3u8_link = f"{base_url}/live/{safe_slug}_{channel_index}.m3u8?url={quote(raw_link, safe='')}"
+                    
+                    current_channel["m3u8"] = virtual_m3u8_link
                     channels.append(current_channel)
                     current_channel = {}
                     
@@ -64,8 +71,8 @@ def get_channels():
         return jsonify({"error": str(e)}), 500
 
 
-@app.route('/stream_proxy', methods=['GET'])
-def stream_proxy():
+@app.route('/live/<path:filename>', methods=['GET'])
+def serve_custom_m3u8(filename):
     encoded_url = request.args.get('url')
     if not encoded_url:
         return "Missing URL parameter", 400
@@ -81,13 +88,12 @@ def stream_proxy():
     try:
         resp = requests.get(target_url, headers=headers, stream=True, timeout=15)
         
-        # अगर पीछे से ही एरर आ गया है, तो उसे सीधे आगे पास कर दो
         if resp.status_code != 200:
             return f"Upstream Error: {resp.status_code}", resp.status_code
         
         content_text = resp.text
         
-        # चेक करो कि क्या यह सच में M3U8 प्लेलिस्ट फाइल है या कोई वीडियो टुकड़ा (.ts/.m4s) है
+        # अगर यह मास्टर या मीडिया M3U8 प्लेलिस्ट है, तो इसके अंदर के सेगमेंट्स को रीराइट करो
         if '.m3u8' in target_url or '#EXTM3U' in content_text:
             base_url = request.host_url.rstrip('/')
             rewritten_lines = []
@@ -99,7 +105,8 @@ def stream_proxy():
                 
                 if not line.startswith("#"):
                     absolute_segment_url = urljoin(target_url, line)
-                    proxied_segment_url = f"{base_url}/stream_proxy?url={quote(absolute_segment_url, safe='')}"
+                    # हर सेगमेंट (.ts या अगली प्लेलिस्ट) को भी हमारे प्रॉक्सी रूट पर मोड़ देंगे
+                    proxied_segment_url = f"{base_url}/live/seg.m3u8?url={quote(absolute_segment_url, safe='')}"
                     rewritten_lines.append(proxied_segment_url)
                 else:
                     rewritten_lines.append(line)
@@ -108,7 +115,7 @@ def stream_proxy():
             return Response(final_playlist, status=200, content_type="application/vnd.apple.mpegurl")
         
         else:
-            # अगर यह असली वीडियो का टुकड़ा है, तो बाइट्स पास करो
+            # अगर प्लेयर सीधे .ts टुकड़े मांग रहा है, तो उन्हें चुपचाप पास कर दो
             return Response(
                 resp.iter_content(chunk_size=4096),
                 status=resp.status_code,
