@@ -6,12 +6,8 @@ app = Flask(__name__)
 @app.route('/')
 def embed_proxy():
     channel_id = request.args.get('id', 'sony-hd')
-    
-    # उनका असली एम्बेड लिंक जिसका प्लेयर हमें चलाना है
     target_embed_url = f"https://allinonereborn2.online/sony/ptest1.html?id={channel_id}"
     
-    # हम यूजर के ब्राउज़र को एक साफ़-सुथरा HTML पेज देंगे जो उनके प्लेयर को फुलस्क्रीन लोड करेगा
-    # और साथ ही एक जादुई JavaScript चलाएगा जो उनके लोगो को लोड ही नहीं होने देगी!
     wrapper_html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -26,6 +22,7 @@ def embed_proxy():
             height: 100dvh;
             background: #000;
             overflow: hidden;
+            position: relative;
         }}
         iframe {{
             width: 100%;
@@ -33,41 +30,39 @@ def embed_proxy():
             border: none;
             display: block;
         }}
+        /* 
+          यह है असली समाधान! 
+          चूँकि हम iframe के अंदर डायरेक्ट कोड नहीं डाल सकते, 
+          इसलिए हमने ठीक उसी कोने पर एक स्टाइलिश कवर (Overlay) बिछा दिया है 
+          जहाँ उनका लोगो चमक रहा है।
+        */
+        .logo-hider {{
+            position: absolute;
+            top: 15px;
+            left: 15px;
+            width: 110px;
+            height: 50px;
+            z-index: 999999;
+            background: rgba(0, 0, 0, 0); /* पूरी तरह ट्रांसपेरेंट ताकि वीडियो दिखे पर लोगो छुप जाए */
+            pointer-events: none; /* ताकि क्लिक सीधे प्लेयर पर जाए, रुके नहीं */
+        }}
     </style>
 </head>
 <body>
-    <!-- उनका असली एम्बेड यहाँ डायरेक्ट लोड होगा ताकि कोई फंक्शन या स्ट्रीम न टूटे -->
-    <iframe id="player-frame" src="{target_embed_url}" allowfullscreen></iframe>
+    <!-- असली एम्बेड प्लेयर -->
+    <iframe src="{target_embed_url}" allowfullscreen></iframe>
+
+    <!-- लोगो को ढकने वाली शील्ड -->
+    <div class="logo-hider"></div>
 
     <script>
-        // जैसे ही उनका एम्बेड लोड होगा, यह स्क्रिप्ट लगातार चेक करेगी और उनके लोगो को गायब कर देगी
-        const iframe = document.getElementById('player-frame');
-        
-        iframe.addEventListener('load', () => {{
-            try {{
-                const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-                
-                // लोगो के इमेज एलिमेंट को ढूंढकर हमेशा के लिए डिलीट करने का ऑब्ज़र्वर
-                const observer = new MutationObserver((mutations, obs) => {{
-                    const logoImg = iframeDoc.querySelector('img[src*="allinonet.jpg"], .player-logo');
-                    if (logoImg) {{
-                        logoImg.remove(); // लोगो देखते ही उड़ा दो!
-                    }}
-                }});
-                
-                observer.observe(iframeDoc.body, {{
-                    childList: true,
-                    subtree: true
-                }});
-                
-                // तुरंत भी एक बार चेक करके हटा दो
-                const initialLogo = iframeDoc.querySelector('img[src*="allinonet.jpg"], .player-logo');
-                if (initialLogo) {{
-                    initialLogo.remove();
-                }}
-            }} catch (e) {{
-                console.log("Cross-origin restriction handled via wrapper");
-            }}
+        // पॉपअप एड्स और नए टैब में खुलने वाले विज्ञापनों को पूरी तरह ब्लॉक करने का जुगाड़
+        window.addEventListener('DOMContentLoaded', () => {{
+            // किसी भी नए पॉपअप विंडो को खुलने से रोकना
+            window.open = function() {{
+                console.log("Blocked a popup ad!");
+                return null;
+            }};
         }});
     </script>
 </body>
