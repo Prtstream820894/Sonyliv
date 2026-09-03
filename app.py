@@ -2,6 +2,7 @@ from flask import Flask, jsonify, request, Response
 import requests
 import re
 import os
+from urllib.parse import urljoin, quote, unquote
 
 app = Flask(__name__)
 
@@ -10,7 +11,7 @@ M3U_SOURCE_URL = "https://tight-firefly-ecdd.poonamchouhan076.workers.dev/"
 
 @app.route('/')
 def home():
-    return "PRT Stream SonyLIV Middleware is Running!"
+    return "PRT Stream SonyLIV Rewriter & Proxy is Running!"
 
 @app.route('/channels', methods=['GET'])
 def get_channels():
@@ -48,7 +49,8 @@ def get_channels():
             elif not line.startswith("#"):
                 if current_channel and "title" in current_channel:
                     raw_link = line
-                    rewritten_link = f"{base_url}/stream_proxy?url={raw_link}"
+                    # चैनल के मास्टर लिंक को भी प्रॉक्सी से गुजारेंगे ताकि .m3u8 फाइल रीराइट हो सके
+                    rewritten_link = f"{base_url}/stream_proxy?url={quote(raw_link, safe='')}"
                     current_channel["m3u8"] = rewritten_link
                     channels.append(current_channel)
                     current_channel = {}
@@ -65,27 +67,53 @@ def get_channels():
 
 @app.route('/stream_proxy', methods=['GET'])
 def stream_proxy():
-    target_url = request.args.get('url')
-    if not target_url:
+    encoded_url = request.args.get('url')
+    if not encoded_url:
         return "Missing URL parameter", 400
     
+    target_url = unquote(encoded_url)
+    
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/120.0.0.0 Mobile Safari/537.36",
+        "Referer": "https://www.sonyliv.com/",
+        "Origin": "https://www.sonyliv.com"
+    }
+    
     try:
-        # मोबाइल प्लेयर / एंड्रॉइड जैसी हेडर ताकि CDN ब्लॉक न करे
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/120.0.0.0 Mobile Safari/537.36",
-            "Referer": "https://www.sonyliv.com/",
-            "Origin": "https://www.sonyliv.com"
-        }
-        
-        # असली Sony/Stream सर्वर से डेटा फेच करना
         resp = requests.get(target_url, headers=headers, stream=True, timeout=15)
         
-        return Response(
-            resp.iter_content(chunk_size=1024),
-            status=resp.status_code,
-            content_type=resp.headers.get('content-type', 'video/mp2t')
-        )
+        # अगर यह फाइल `.m3u8` है, तो इसके अंदर के चंक्स को रीराइट करना पड़ेगा!
+        if '.m3u8' in target_url or 'm3u8' in resp.headers.get('content-type', ''):
+            content_text = resp.text
+            base_url = request.host_url.rstrip('/')
+            rewritten_lines = []
+            
+            for line in content_text.splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                
+                # अगर लाइन कोई यूआरएल या चंक फाइल है (जो # से शुरू नहीं होती)
+                if not line.startswith("#"):
+                    # अगर लिंक रिलेटिव है तो उसे टारगेट यूआरएल के हिसाब से पूरा बनाओ
+                    absolute_segment_url = urljoin(target_url, line)
+                    # फिर उसे हमारे प्रॉक्सी के जरिए लूप में डालो
+                    proxied_segment_url = f"{base_url}/stream_proxy?url={quote(absolute_segment_url, safe='')}"
+                    rewritten_lines.append(proxied_segment_url)
+                else:
+                    rewritten_lines.append(line)
+                    
+            final_playlist = "\n".join(rewritten_lines)
+            return Response(final_playlist, status=200, content_type="application/vnd.apple.mpegurl")
         
+        else:
+            # अगर यह असली वीडियो का टुकड़ा (.ts या .m4s) है, तो इसे सीधे प्लेयर को पास कर दो
+            return Response(
+                resp.iter_content(chunk_size=4096),
+                status=resp.status_code,
+                content_type=resp.headers.get('content-type', 'video/mp2t')
+            )
+            
     except Exception as e:
         return str(e), 500
 
