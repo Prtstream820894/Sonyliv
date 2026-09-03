@@ -49,7 +49,6 @@ def get_channels():
             elif not line.startswith("#"):
                 if current_channel and "title" in current_channel:
                     raw_link = line
-                    # चैनल के मास्टर लिंक को भी प्रॉक्सी से गुजारेंगे ताकि .m3u8 फाइल रीराइट हो सके
                     rewritten_link = f"{base_url}/stream_proxy?url={quote(raw_link, safe='')}"
                     current_channel["m3u8"] = rewritten_link
                     channels.append(current_channel)
@@ -82,9 +81,14 @@ def stream_proxy():
     try:
         resp = requests.get(target_url, headers=headers, stream=True, timeout=15)
         
-        # अगर यह फाइल `.m3u8` है, तो इसके अंदर के चंक्स को रीराइट करना पड़ेगा!
-        if '.m3u8' in target_url or 'm3u8' in resp.headers.get('content-type', ''):
-            content_text = resp.text
+        # अगर पीछे से ही एरर आ गया है, तो उसे सीधे आगे पास कर दो
+        if resp.status_code != 200:
+            return f"Upstream Error: {resp.status_code}", resp.status_code
+        
+        content_text = resp.text
+        
+        # चेक करो कि क्या यह सच में M3U8 प्लेलिस्ट फाइल है या कोई वीडियो टुकड़ा (.ts/.m4s) है
+        if '.m3u8' in target_url or '#EXTM3U' in content_text:
             base_url = request.host_url.rstrip('/')
             rewritten_lines = []
             
@@ -93,11 +97,8 @@ def stream_proxy():
                 if not line:
                     continue
                 
-                # अगर लाइन कोई यूआरएल या चंक फाइल है (जो # से शुरू नहीं होती)
                 if not line.startswith("#"):
-                    # अगर लिंक रिलेटिव है तो उसे टारगेट यूआरएल के हिसाब से पूरा बनाओ
                     absolute_segment_url = urljoin(target_url, line)
-                    # फिर उसे हमारे प्रॉक्सी के जरिए लूप में डालो
                     proxied_segment_url = f"{base_url}/stream_proxy?url={quote(absolute_segment_url, safe='')}"
                     rewritten_lines.append(proxied_segment_url)
                 else:
@@ -107,7 +108,7 @@ def stream_proxy():
             return Response(final_playlist, status=200, content_type="application/vnd.apple.mpegurl")
         
         else:
-            # अगर यह असली वीडियो का टुकड़ा (.ts या .m4s) है, तो इसे सीधे प्लेयर को पास कर दो
+            # अगर यह असली वीडियो का टुकड़ा है, तो बाइट्स पास करो
             return Response(
                 resp.iter_content(chunk_size=4096),
                 status=resp.status_code,
