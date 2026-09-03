@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, request
 import requests
 import re
+import os
 
 app = Flask(__name__)
 
@@ -55,7 +56,6 @@ def get_channels():
                     raw_link = line
                     
                     # 3. यहाँ हम असली लिंक को अपनी प्रॉक्सी/रीराइटर फॉर्मेट में बदल रहे हैं
-                    # (आगे चलकर इस डोमेन/पाथ पर तेरी सेगमेंट रीराइटर प्रॉक्सी बनेगी)
                     rewritten_link = f"/stream_proxy?url={raw_link}"
                     
                     current_channel["m3u8"] = rewritten_link
@@ -72,4 +72,5 @@ def get_channels():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port)
