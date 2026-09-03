@@ -70,17 +70,16 @@ def stream_proxy():
         return "Missing URL parameter", 400
     
     try:
-        # ब्रॉउज़र या प्लेयर जैसी हेडर भेजना ताकि ब्लॉक न करे
+        # मोबाइल प्लेयर / एंड्रॉइड जैसी हेडर ताकि CDN ब्लॉक न करे
         headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-            "Referer": "https://www.sonyliv.com/"
+            "User-Agent": "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/120.0.0.0 Mobile Safari/537.36",
+            "Referer": "https://www.sonyliv.com/",
+            "Origin": "https://www.sonyliv.com"
         }
         
         # असली Sony/Stream सर्वर से डेटा फेच करना
         resp = requests.get(target_url, headers=headers, stream=True, timeout=15)
         
-        # अगर यह एक m3u8 प्लेलिस्ट फाइल है, तो उसके अंदर के लिंक्स को भी रीराइट करना पड़ सकता है
-        # फ़िलहाल हम इसे सीधा पास कर रहे हैं ताकि चेक कर सकें कि रिस्पॉन्स आ रहा है या नहीं
         return Response(
             resp.iter_content(chunk_size=1024),
             status=resp.status_code,
